@@ -26,8 +26,20 @@ namespace MiningpoolSwitcher
         public Form1()
         {
             InitializeComponent();
-            
-            ReadWritePhoenixConfig();
+                        
+            //инициализируем настроки времени переключения на PPS c Prop.
+            string ticks_str = Utils.GetRegistryKey("PropPeriodTicks");
+            if (string.IsNullOrEmpty(ticks_str))
+                ticks_str = "180000000000"; // 5 часов
+            long ticks;
+            long.TryParse(ticks_str, out ticks);
+            _periodProp = new TimeSpan(ticks);
+            nudHour.Value = _periodProp.Hours;
+            nudMinutes.Value = _periodProp.Minutes;
+            nudHour.ValueChanged += nudMinutes_ValueChanged;
+            nudMinutes.ValueChanged += nudMinutes_ValueChanged;
+
+            ReadWritePhoenixConfig();            
             
             _thread = new Thread(CheckPhoenixByRPC);
             _thread.Start();
@@ -86,75 +98,72 @@ namespace MiningpoolSwitcher
                 ReadWritePhoenixConfig(true);
                 try { Process.Start("rerun.bat"); }
                 catch (Exception ex) { MessageBox.Show(ex.Message); }
-                Log("Основной пул deepbit.net: {0} " + (isPoolDeepbitMainCurrent ? "Да" : "Нет"));
+                Utils.Log("Основной пул deepbit.net: {0} " + (isPoolDeepbitMainCurrent ? "Да" : "Нет"));
             }
             ReadWritePhoenixConfig();
-            this.Invoke(new UpdateFormDelegate(this.ChangeSomeFormControls), new object[] { });
-        }
-
-
-        public static void Log(string s, string logfile = "MiningPoolSwitcher.txt")
-        {
-            //удаляем файл, если он превышает 10 метров
-            FileInfo fi = new FileInfo(logfile);
-            if (fi.Exists && fi.Length > 10000000)
-                fi.Delete();
-
-            File.AppendAllText(logfile, string.Format("{0}: {1}\r\n", DateTime.Now, s));
+            try
+            {
+                this.Invoke(new UpdateFormDelegate(this.ChangeSomeFormControls), new object[] { });
+            }
+            catch { }
         }
 
         bool isPoolDeepbitMainCurrent; // текущее значение конфига
+
+        TimeSpan _periodProp = new TimeSpan(6, 0, 0);
 
         bool? isPoolDeepbitMainNeed // на Deepbit прошло менее 6 часов с последнего блока
         {
             get
             {
                 if (_lastBlockDate != DateTime.MinValue)
-                    return DateTime.Now - _lastBlockDate <= new TimeSpan(6, 0, 0);
+                    return DateTime.Now - _lastBlockDate <= _periodProp;
                 else
                     return null;
             }
         }
 
-
         void ReadWritePhoenixConfig(bool isWrite = false)
         {
-            string[] ss = File.ReadAllLines("phoenix.cfg");
-            string[] ss_new = new string[ss.Count()];
-            string acc_deepbit = string.Empty;
-            string acc_50btc = string.Empty;
-
-            //находим строки подключения к пулам
-            foreach (string s in ss)
+            try
             {
-                if (s.Trim().IndexOf("50btc.com") > -1)
-                    acc_50btc = s.Substring(s.IndexOf("=") + 1).Trim();
-                if (s.Trim().IndexOf("deepbit.net") > -1)
+                string[] ss = File.ReadAllLines("phoenix.cfg");
+                string[] ss_new = new string[ss.Count()];
+                string acc_deepbit = string.Empty;
+                string acc_50btc = string.Empty;
+
+                //находим строки подключения к пулам
+                foreach (string s in ss)
                 {
-                    acc_deepbit = s.Substring(s.IndexOf("=") + 1).Trim();
+                    if (s.Trim().IndexOf("50btc.com") > -1)
+                        acc_50btc = s.Substring(s.IndexOf("=") + 1).Trim();
+                    if (s.Trim().IndexOf("deepbit.net") > -1)
+                    {
+                        acc_deepbit = s.Substring(s.IndexOf("=") + 1).Trim();
 
-                    //isPoolDeepbitMainCurrent = s.Trim()!= s.Trim().IndexOf("backend") == 0;
+                        //isPoolDeepbitMainCurrent = s.Trim()!= s.Trim().IndexOf("backend") == 0;
 
-                    if (s.Trim().IndexOf("backend") == 0)
-                        isPoolDeepbitMainCurrent = true;
-                    else if (s.Trim().IndexOf("backups") == 0)
-                        isPoolDeepbitMainCurrent = false;
+                        if (s.Trim().IndexOf("backend") == 0)
+                            isPoolDeepbitMainCurrent = true;
+                        else if (s.Trim().IndexOf("backups") == 0)
+                            isPoolDeepbitMainCurrent = false;
+                    }
                 }
 
-            }
+                for (int i = 0; i < ss.Count(); i++)
+                {
+                    if (ss[i].Trim().IndexOf("backend") == 0)
+                        ss_new[i] = "backend = " + (isPoolDeepbitMainNeed == true ? acc_deepbit : acc_50btc);
+                    else if (ss[i].Trim().IndexOf("backups") == 0)
+                        ss_new[i] = "backups = " + (!isPoolDeepbitMainNeed == true ? acc_deepbit : acc_50btc);
+                    else
+                        ss_new[i] = ss[i];
+                }
 
-            for (int i = 0; i < ss.Count(); i++)
-            {
-                if (ss[i].Trim().IndexOf("backend") == 0)
-                    ss_new[i] = "backend = " + (isPoolDeepbitMainNeed == true ? acc_deepbit : acc_50btc);
-                else if (ss[i].Trim().IndexOf("backups") == 0)
-                    ss_new[i] = "backups = " + (!isPoolDeepbitMainNeed == true ? acc_deepbit : acc_50btc);
-                else
-                    ss_new[i] = ss[i];
+                if (isWrite)
+                    File.WriteAllLines("phoenix.cfg", ss_new);
             }
-
-            if (isWrite)
-                File.WriteAllLines("phoenix.cfg", ss_new);
+            catch (Exception ex) { Utils.Log(ex.Message); }
         }
 
 
@@ -162,6 +171,12 @@ namespace MiningpoolSwitcher
         {
             _stop.Set();
             Thread.Sleep(200);
+        }
+
+        private void nudMinutes_ValueChanged(object sender, EventArgs e)
+        {
+            _periodProp = new TimeSpan((int)nudHour.Value, (int)nudMinutes.Value, 0);
+            Utils.SetRegistryKey("PropPeriodTicks", _periodProp.Ticks.ToString());
         }
     }
 }
