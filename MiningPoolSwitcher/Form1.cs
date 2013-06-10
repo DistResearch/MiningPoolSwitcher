@@ -41,35 +41,39 @@ namespace MiningpoolSwitcher
 
             ReadWritePhoenixConfig();            
             
-            _thread = new Thread(CheckPhoenixByRPC);
+            _thread = new Thread(DoCheckingDeepbit);
             _thread.Start();
         }
 
-        private void CheckPhoenixByRPC()
+        private void DoCheckingDeepbit()
         {
             do
             {
-                string htmlCode;
-                using (WebClient client = new WebClient())
-                {
-                    htmlCode = client.DownloadString("https://deepbit.net/stats");
-                }
-
-                Regex r = new Regex("/\\w{64}?'>(.*?)</tr");
-                foreach (Match m in r.Matches(htmlCode))
-                {
-                    string strDate = (new Regex("(.*?)</a")).Match(m.Groups[1].Value).Groups[1].Value.Replace("&nbsp;", " ");
-                    DateTime utcDate = DateTime.ParseExact(strDate, "dd.MM H:mm:ss", null);
-                    _lastBlockDate = utcDate.ToLocalTime();
-                    _duration = (new Regex("<td>(.*?)</td>")).Match(m.Groups[1].Value).Groups[1].Value;
-                    break;
-                }
-
                 try
                 {
-                    this.Invoke(new UpdateFormDelegate(this.ChangeSomeFormControls), new object[] { });
+                    string htmlCode;
+                    using (WebClient client = new WebClient())
+                    {
+                        htmlCode = client.DownloadString("https://deepbit.net/stats");
+                    }
+
+                    Regex r = new Regex("/\\w{64}?'>(.*?)</tr");
+                    foreach (Match m in r.Matches(htmlCode))
+                    {
+                        string strDate = (new Regex("(.*?)</a")).Match(m.Groups[1].Value).Groups[1].Value.Replace("&nbsp;", " ");
+                        DateTime utcDate = DateTime.ParseExact(strDate, "dd.MM H:mm:ss", null);
+                        _lastBlockDate = utcDate.ToLocalTime();
+                        _duration = (new Regex("<td>(.*?)</td>")).Match(m.Groups[1].Value).Groups[1].Value;
+                        break;
+                    }
+
+                    try
+                    {
+                        this.Invoke(new UpdateFormDelegate(this.ChangeSomeFormControls), new object[] { });
+                    }
+                    catch { }
                 }
-                catch { }
+                catch (Exception ex) { Utils.Log(ex.Message); }
 
                 SwitchPoolIfNeed();
             }
